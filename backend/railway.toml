@@ -1,0 +1,2 @@
+[deploy]
+startCommand = "flask --app run db upgrade && gunicorn run:app"
