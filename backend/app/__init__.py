@@ -18,20 +18,25 @@ def create_app():
 
     # Core config
     app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///dev.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    # Fix Railway's postgres:// prefix and use psycopg3 driver
+    db_url = os.environ.get("DATABASE_URL", "sqlite:///dev.db")
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 
     # Google OAuth config
     app.config["GOOGLE_CLIENT_ID"] = os.environ["GOOGLE_CLIENT_ID"]
     app.config["GOOGLE_CLIENT_SECRET"] = os.environ["GOOGLE_CLIENT_SECRET"]
 
-    # Allow session cookies to work cross-origin in development
+    # Session cookie config
     is_production = os.environ.get("FLASK_ENV") == "production"
-
-    app.config["SESSION_COOKIE_SAMESITE"] = "None" if is_production else "Lax"
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = is_production
     app.config["SESSION_COOKIE_HTTPONLY"] = True
-
 
     # CORS — only allow requests from your frontend
     CORS(app, supports_credentials=True, origins=[os.environ.get("FRONTEND_URL", "http://localhost:5173")])
