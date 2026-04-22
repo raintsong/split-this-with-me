@@ -27,7 +27,6 @@ def create_group():
     )
     group.members.append(current_user)
 
-    # Add other members by email if provided
     for email in data.get("member_emails", []):
         member = User.query.filter_by(email=email).first()
         if member and member not in group.members:
@@ -58,6 +57,72 @@ def delete_group(group_id):
     return jsonify({"message": "Deleted"})
 
 
+@groups_bp.route("/<int:group_id>/members", methods=["POST"])
+@login_required
+def add_member(group_id):
+    """Add a user to a group by user_id or email."""
+    group = Group.query.get_or_404(group_id)
+    if current_user not in group.members:
+        return jsonify({"error": "Forbidden"}), 403
+
+    data = request.get_json()
+    user = None
+
+    if data.get("user_id"):
+        user = User.query.get(data["user_id"])
+    elif data.get("email"):
+        user = User.query.filter_by(email=data["email"]).first()
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user in group.members:
+        return jsonify({"error": "User is already a member"}), 400
+
+    group.members.append(user)
+    db.session.commit()
+    return jsonify(group.to_dict())
+
+
+@groups_bp.route("/<int:group_id>/members/<int:user_id>", methods=["DELETE"])
+@login_required
+def remove_member(group_id, user_id):
+    """Remove a user from a group. Only the creator can remove others."""
+    group = Group.query.get_or_404(group_id)
+    if current_user not in group.members:
+        return jsonify({"error": "Forbidden"}), 403
+    if current_user.id != group.created_by_id and current_user.id != user_id:
+        return jsonify({"error": "Only the group creator can remove others"}), 403
+
+    user = User.query.get_or_404(user_id)
+    if user.id == group.created_by_id:
+        return jsonify({"error": "Cannot remove the group creator"}), 400
+    if user not in group.members:
+        return jsonify({"error": "User is not a member"}), 400
+
+    group.members.remove(user)
+    db.session.commit()
+    return jsonify(group.to_dict())
+
+
+@groups_bp.route("/users/search", methods=["GET"])
+@login_required
+def search_users():
+    """Search all registered users by name or email. Used for adding members."""
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify([])
+
+    users = User.query.filter(
+        (User.display_name.ilike(f"%{q}%")) | (User.email.ilike(f"%{q}%"))
+    ).limit(10).all()
+
+    return jsonify([
+        {"id": u.id, "display_name": u.display_name, "email": u.email}
+        for u in users
+        if u.id != current_user.id  # Don't return yourself
+    ])
+
+
 @groups_bp.route("/<int:group_id>/balances", methods=["GET"])
 @login_required
 def get_balances(group_id):
@@ -66,8 +131,6 @@ def get_balances(group_id):
     if current_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
 
-    # Build a balance map: {user_id: {currency: net_amount}}
-    # Positive = owed money, Negative = owes money
     balances = {m.id: {"user": {"id": m.id, "display_name": m.display_name}, "currencies": {}} for m in group.members}
 
     for tx in group.transactions:
@@ -81,11 +144,9 @@ def get_balances(group_id):
             if uid not in balances:
                 continue
 
-            # The person who split this owes their share
             balances[uid]["currencies"].setdefault(currency, 0)
             balances[uid]["currencies"][currency] -= share
 
-            # The payer gets credited
             balances[payer_id]["currencies"].setdefault(currency, 0)
             balances[payer_id]["currencies"][currency] += share
 
