@@ -104,11 +104,13 @@ def settle(group_id):
 
     amount = float(data["amount"])
 
-    # Settlement: payee paid the full amount, payer owes it all
-    # This means payer's debt to payee is cleared
+    # Settlement: payer sends money to payee.
+    # paid_by = payer (they are sending the money).
+    # Payee holds the full split — this deducts from payee's positive balance
+    # and credits the payer, netting both toward zero.
     tx = Transaction(
         group_id=group_id,
-        paid_by_id=data["payee_id"],  # payee is "paid by" — they receive the money
+        paid_by_id=data["payer_id"],  # payer sent the money
         description=f"Settlement: {payer_user.display_name} → {payee_user.display_name}",
         amount=amount,
         currency=data["currency"],
@@ -118,9 +120,10 @@ def settle(group_id):
     db.session.add(tx)
     db.session.flush()
 
-    # Payer owes the full amount, payee owes nothing
-    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payer_id"], share_amount=amount))
-    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payee_id"], share_amount=0))
+    # Payee holds the full split — cancels their positive balance.
+    # Payer gets credited as the one who paid, cancels their negative balance.
+    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payee_id"], share_amount=amount))
+    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payer_id"], share_amount=0))
 
     db.session.commit()
     return jsonify(tx.to_dict()), 201
