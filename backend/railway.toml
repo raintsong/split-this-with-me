@@ -1,2 +1,2 @@
 [deploy]
-flask --app run db stamp d5a950f03ad3 && flask --app run db upgrade
+startCommand = "flask --app run db stamp d5a950f03ad3 && flask --app run db upgrade && gunicorn run:app"
