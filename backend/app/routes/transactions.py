@@ -125,41 +125,39 @@ def settle(group_id):
     db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payee_id"], share_amount=amount))
     db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payer_id"], share_amount=0))
 
-    db.session.flush()
+    db.session.commit()
 
-    # Check if this settlement zeros out the balance between payer and payee
-    # in this currency. If so, mark all their transactions in this group/currency as hidden.
+    # After committing, recompute the balance between payer and payee in this currency
+    # using the same logic as the main balance endpoint.
+    # If the net is now zero, mark all related transactions as hidden.
     currency_val = data["currency"]
     payer_id = data["payer_id"]
     payee_id = data["payee_id"]
 
-    # Recompute balance between just these two people in this currency
-    net = 0.0
+    # Build per-user balance using standard logic
+    balances = {payer_id: 0.0, payee_id: 0.0}
     all_txs = Transaction.query.filter_by(group_id=group_id).all()
+
     for t in all_txs:
         if t.currency != currency_val:
             continue
         for s in t.splits:
-            if s.user_id in (payer_id, payee_id):
-                share = float(s.share_amount)
-                if s.user_id == payee_id:
-                    net -= share
-                if t.paid_by_id == payee_id:
-                    net += share
-                if s.user_id == payer_id:
-                    net += share
-                if t.paid_by_id == payer_id:
-                    net -= share
+            uid = s.user_id
+            share = float(s.share_amount)
+            if uid in balances:
+                balances[uid] -= share
+            if t.paid_by_id in balances:
+                balances[t.paid_by_id] += share
 
-    # If net is effectively zero, hide all related transactions
-    if abs(net) < 0.01:
+    # Both balances should be equal and opposite — check if they net to zero
+    if abs(balances[payer_id]) < 0.01 and abs(balances[payee_id]) < 0.01:
         for t in all_txs:
             if t.currency == currency_val:
                 involved = {s.user_id for s in t.splits} | {t.paid_by_id}
-                if payer_id in involved or payee_id in involved:
+                if payer_id in involved and payee_id in involved:
                     t.is_hidden = True
+        db.session.commit()
 
-    db.session.commit()
     return jsonify(tx.to_dict()), 201
 
 
