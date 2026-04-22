@@ -1,11 +1,32 @@
-// Base URL is empty in dev (Vite proxy handles it) and set to the Railway URL in production
 const BASE_URL = import.meta.env.VITE_API_URL || "";
 
+export function getToken() {
+  return localStorage.getItem("auth_token");
+}
+
+export function setToken(token) {
+  localStorage.setItem("auth_token", token);
+}
+
+export function clearToken() {
+  localStorage.removeItem("auth_token");
+}
+
 export async function api(path, options = {}) {
+  const token = getToken();
+  const headers = {
+    "Content-Type": "application/json",
+    ...options.headers,
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
-    credentials: "include", // Always send session cookie
     ...options,
+    headers,
+    credentials: "include",
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
@@ -14,12 +35,10 @@ export async function api(path, options = {}) {
     throw new Error(err.error || "Request failed");
   }
 
-  // 204 No Content
   if (response.status === 204) return null;
   return response.json();
 }
 
-// Convenience hooks for components that need loading/error state
 import { useState, useEffect } from "react";
 
 export function useFetch(path, deps = []) {

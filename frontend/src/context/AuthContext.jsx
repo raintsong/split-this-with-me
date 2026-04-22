@@ -1,14 +1,27 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { api } from "../hooks/useApi";
+import { useNavigate, useLocation } from "react-router-dom";
+import { api, getToken, setToken, clearToken } from "../hooks/useApi";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // On mount, check if the user is already logged in via session cookie
+    // Check if we just came back from Google OAuth with a token in the URL
+    const params = new URLSearchParams(location.search);
+    const tokenFromUrl = params.get("token");
+
+    if (tokenFromUrl) {
+      setToken(tokenFromUrl);
+      // Clean the token out of the URL
+      navigate("/dashboard", { replace: true });
+    }
+
+    // Now check auth using whatever token we have
     api("/auth/me")
       .then((data) => {
         if (data.authenticated) setUser(data.user);
@@ -18,7 +31,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = async () => {
-    await api("/auth/logout", { method: "POST" });
+    await api("/auth/logout", { method: "POST" }).catch(() => {});
+    clearToken();
     setUser(null);
   };
 

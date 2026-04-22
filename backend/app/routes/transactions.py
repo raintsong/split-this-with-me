@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from .utils import jwt_or_login_required as login_required
 from ..models import Transaction, TransactionSplit, Group
 from .. import db
 import datetime
