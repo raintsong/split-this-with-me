@@ -33,8 +33,10 @@ def create_app():
     app.config["GOOGLE_CLIENT_SECRET"] = os.environ["GOOGLE_CLIENT_SECRET"]
 
     # Session cookie config
+    # In production: SameSite=None + Secure=True required for cross-origin cookies
+    # In development: SameSite=Lax + Secure=False so cookies work over http://localhost
     is_production = os.environ.get("FLASK_ENV") == "production"
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SAMESITE"] = "None" if is_production else "Lax"
     app.config["SESSION_COOKIE_SECURE"] = is_production
     app.config["SESSION_COOKIE_HTTPONLY"] = True
 
