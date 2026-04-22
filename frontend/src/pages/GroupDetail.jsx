@@ -15,8 +15,16 @@ export default function GroupDetail() {
 
   const [showTxForm, setShowTxForm] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
-  const [form, setForm] = useState({ description: "", amount: "", currency: "USD", date: today(), splits: [] });
   const [saving, setSaving] = useState(false);
+
+  // Transaction form state
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [date, setDate] = useState(today());
+  const [paidById, setPaidById] = useState(null); // null = current user
+  const [splitMode, setSplitMode] = useState("even"); // "even" or "custom"
+  const [customSplits, setCustomSplits] = useState([]);
 
   // Member search state
   const [memberQuery, setMemberQuery] = useState("");
@@ -29,7 +37,6 @@ export default function GroupDetail() {
     setSearching(true);
     try {
       const results = await api(`/api/groups/users/search?q=${encodeURIComponent(q)}`);
-      // Filter out people already in the group
       const memberIds = new Set(group?.members.map(m => m.id) || []);
       setSearchResults(results.filter(u => !memberIds.has(u.id)));
     } catch (e) {
@@ -42,15 +49,12 @@ export default function GroupDetail() {
   const addMember = async (u) => {
     try {
       const updated = await api(`/api/groups/${groupId}/members`, {
-        method: "POST",
-        body: { user_id: u.id },
+        method: "POST", body: { user_id: u.id },
       });
       setGroup(updated);
       setSearchResults([]);
       setMemberQuery("");
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
   const removeMember = async (memberId) => {
@@ -58,53 +62,78 @@ export default function GroupDetail() {
     try {
       const updated = await api(`/api/groups/${groupId}/members/${memberId}`, { method: "DELETE" });
       setGroup(updated);
-    } catch (err) {
-      alert(err.message);
+    } catch (err) { alert(err.message); }
+  };
+
+  // When amount changes in even mode, keep customSplits in sync
+  const handleAmountChange = (val) => {
+    setAmount(val);
+    if (splitMode === "custom" && group) {
+      const share = group.members.length ? (parseFloat(val) / group.members.length).toFixed(2) : "0";
+      setCustomSplits(group.members.map(m => ({ user_id: m.id, display_name: m.display_name, share_amount: share })));
     }
   };
 
-  const initSplits = (members, amount) => {
-    const share = members.length ? (parseFloat(amount) / members.length).toFixed(2) : "0";
-    return members.map((m) => ({ user_id: m.id, display_name: m.display_name, share_amount: share }));
-  };
-
-  const handleFormChange = (field, value) => {
-    setForm((f) => {
-      const updated = { ...f, [field]: value };
-      if (field === "amount" && group) {
-        updated.splits = initSplits(group.members, updated.amount || 0);
-      }
-      return updated;
-    });
-  };
-
   const openTxForm = () => {
-    if (group) setForm((f) => ({ ...f, splits: initSplits(group.members, f.amount || 0) }));
+    if (group) {
+      setPaidById(user?.id);
+      const share = group.members.length ? (parseFloat(amount || 0) / group.members.length).toFixed(2) : "0";
+      setCustomSplits(group.members.map(m => ({ user_id: m.id, display_name: m.display_name, share_amount: share })));
+    }
     setShowTxForm(true);
   };
 
-  const updateSplit = (userId, value) => {
-    setForm((f) => ({
-      ...f,
-      splits: f.splits.map((s) => s.user_id === userId ? { ...s, share_amount: value } : s),
-    }));
+  const handleSplitModeChange = (mode) => {
+    setSplitMode(mode);
+    if (mode === "custom" && group) {
+      const share = group.members.length ? (parseFloat(amount || 0) / group.members.length).toFixed(2) : "0";
+      setCustomSplits(group.members.map(m => ({ user_id: m.id, display_name: m.display_name, share_amount: share })));
+    }
   };
+
+  const updateCustomSplit = (userId, value) => {
+    setCustomSplits(prev => prev.map(s => s.user_id === userId ? { ...s, share_amount: value } : s));
+  };
+
+  // Build splits payload — even split divides equally, custom uses entered values
+  const buildSplits = () => {
+    if (splitMode === "even") {
+      const members = group.members;
+      const share = (parseFloat(amount) / members.length).toFixed(2);
+      // Adjust for rounding — add remainder to first member
+      const splits = members.map(m => ({ user_id: m.id, share_amount: parseFloat(share) }));
+      const total = splits.reduce((s, x) => s + x.share_amount, 0);
+      const diff = parseFloat((parseFloat(amount) - total).toFixed(2));
+      if (diff !== 0) splits[0].share_amount = parseFloat((splits[0].share_amount + diff).toFixed(2));
+      return splits;
+    }
+    return customSplits.map(s => ({ user_id: s.user_id, share_amount: parseFloat(s.share_amount) }));
+  };
+
+  const customTotal = customSplits.reduce((s, x) => s + (parseFloat(x.share_amount) || 0), 0);
+  const txTotal = parseFloat(amount) || 0;
+  const splitsDiff = Math.abs(customTotal - txTotal);
 
   const submitTransaction = async (e) => {
     e.preventDefault();
+    if (splitMode === "custom" && splitsDiff > 0.01) return;
     setSaving(true);
     try {
-      const payload = {
-        description: form.description,
-        amount: parseFloat(form.amount),
-        currency: form.currency,
-        date: form.date,
-        splits: form.splits.map((s) => ({ user_id: s.user_id, share_amount: parseFloat(s.share_amount) })),
-      };
-      const tx = await api(`/api/transactions/group/${groupId}`, { method: "POST", body: payload });
-      setTransactions((prev) => [tx, ...(prev || [])]);
-      setForm({ description: "", amount: "", currency: "USD", date: today(), splits: initSplits(group.members, 0) });
-      setShowTxForm(false);
+      const tx = await api(`/api/transactions/group/${groupId}`, {
+        method: "POST",
+        body: {
+          description,
+          amount: parseFloat(amount),
+          currency,
+          date,
+          paid_by_id: paidById || user?.id,
+          splits: buildSplits(),
+        },
+      });
+      setTransactions(prev => [tx, ...(prev || [])]);
+      // Reset form
+      setDescription(""); setAmount(""); setCurrency("USD"); setDate(today());
+      setSplitMode("even"); setShowTxForm(false);
       const newBalances = await api(`/api/groups/${groupId}/balances`);
       setBalances(newBalances);
     } catch (err) {
@@ -117,7 +146,7 @@ export default function GroupDetail() {
   const deleteTransaction = async (txId) => {
     if (!confirm("Delete this transaction?")) return;
     await api(`/api/transactions/${txId}`, { method: "DELETE" });
-    setTransactions((prev) => prev.filter((t) => t.id !== txId));
+    setTransactions(prev => prev.filter(t => t.id !== txId));
     const newBalances = await api(`/api/groups/${groupId}/balances`);
     setBalances(newBalances);
   };
@@ -125,22 +154,18 @@ export default function GroupDetail() {
   if (groupLoading) return <div style={{ padding: "2rem" }}>Loading…</div>;
   if (!group) return <div style={{ padding: "2rem" }}>Group not found.</div>;
 
-  const splitsTotal = form.splits.reduce((sum, s) => sum + (parseFloat(s.share_amount) || 0), 0);
-  const txTotal = parseFloat(form.amount) || 0;
-  const splitsDiff = Math.abs(splitsTotal - txTotal);
   const isCreator = group.created_by_id === user?.id;
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "2rem 1rem" }}>
       <Link to="/dashboard" style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>← Dashboard</Link>
 
-      {/* Group header */}
       <div style={{ margin: "1rem 0 1.5rem" }}>
         <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>{group.name}</h1>
         {group.description && <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>{group.description}</p>}
       </div>
 
-      {/* Members section */}
+      {/* Members */}
       <div style={{ ...card, marginBottom: "1.5rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
           <h2 style={{ fontSize: "0.9rem", fontWeight: 600 }}>Members</h2>
@@ -148,8 +173,6 @@ export default function GroupDetail() {
             {showMemberForm ? "Cancel" : "+ Add member"}
           </button>
         </div>
-
-        {/* Member list */}
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           {group.members.map((m) => (
             <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -168,16 +191,10 @@ export default function GroupDetail() {
             </div>
           ))}
         </div>
-
-        {/* Add member search */}
         {showMemberForm && (
           <div style={{ marginTop: "1rem", borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
-            <input
-              placeholder="Search by name or email…"
-              value={memberQuery}
-              onChange={(e) => searchUsers(e.target.value)}
-              style={inputStyle}
-            />
+            <input placeholder="Search by name or email…" value={memberQuery}
+              onChange={(e) => searchUsers(e.target.value)} style={inputStyle} />
             {searching && <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)", marginTop: "0.4rem" }}>Searching…</p>}
             {searchResults.length > 0 && (
               <div style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
@@ -210,12 +227,12 @@ export default function GroupDetail() {
           {balances.map((b) => (
             <div key={b.user.id} style={{ marginBottom: "0.4rem" }}>
               <span style={{ fontWeight: 500 }}>{b.user.display_name}</span>
-              {Object.entries(b.currencies).map(([currency, amount]) => (
-                <span key={currency} style={{
+              {Object.entries(b.currencies).map(([cur, amt]) => (
+                <span key={cur} style={{
                   marginLeft: "0.75rem", fontSize: "0.875rem",
-                  color: amount >= 0 ? "var(--color-success)" : "var(--color-danger)",
+                  color: amt >= 0 ? "var(--color-success)" : "var(--color-danger)",
                 }}>
-                  {amount >= 0 ? "+" : ""}{Number(amount).toFixed(2)} {currency}
+                  {amt >= 0 ? "+" : ""}{Number(amt).toFixed(2)} {cur}
                 </span>
               ))}
               {Object.keys(b.currencies).length === 0 && (
@@ -236,34 +253,78 @@ export default function GroupDetail() {
 
       {showTxForm && (
         <form onSubmit={submitTransaction} style={{ ...card, marginBottom: "1rem" }}>
-          <input placeholder="Description" required value={form.description}
-            onChange={(e) => handleFormChange("description", e.target.value)} style={inputStyle} />
+
+          {/* Description */}
+          <input placeholder="Description" required value={description}
+            onChange={e => setDescription(e.target.value)} style={inputStyle} />
+
+          {/* Amount + currency */}
           <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-            <input type="number" placeholder="Amount" required min="0.01" step="0.01" value={form.amount}
-              onChange={(e) => handleFormChange("amount", e.target.value)}
-              style={{ ...inputStyle, flex: 2 }} />
-            <select value={form.currency} onChange={(e) => handleFormChange("currency", e.target.value)}
-              style={{ ...inputStyle, flex: 1 }}>
-              {(currencies || ["USD", "EUR", "GBP", "JPY"]).map((c) => (
+            <input type="number" placeholder="Amount" required min="0.01" step="0.01" value={amount}
+              onChange={e => handleAmountChange(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
+            <select value={currency} onChange={e => setCurrency(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+              {(currencies || ["USD", "EUR", "GBP", "JPY"]).map(c => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
-          <input type="date" value={form.date} onChange={(e) => handleFormChange("date", e.target.value)}
+
+          {/* Date */}
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
             style={{ ...inputStyle, marginTop: "0.5rem" }} />
 
-          {form.splits.length > 0 && (
-            <div style={{ marginTop: "1rem" }}>
-              <p style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.4rem", color: "var(--color-text-secondary)" }}>
-                Split amounts
-              </p>
-              {form.splits.map((s) => (
+          {/* Paid by */}
+          <div style={{ marginTop: "0.75rem" }}>
+            <label style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text-secondary)", display: "block", marginBottom: "0.3rem" }}>
+              Paid by
+            </label>
+            <select value={paidById || user?.id} onChange={e => setPaidById(parseInt(e.target.value))}
+              style={inputStyle}>
+              {group.members.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.id === user?.id ? `${m.display_name} (you)` : m.display_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Split mode toggle */}
+          <div style={{ marginTop: "0.75rem" }}>
+            <label style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text-secondary)", display: "block", marginBottom: "0.3rem" }}>
+              Split
+            </label>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="button" onClick={() => handleSplitModeChange("even")}
+                style={{ ...toggleBtn, background: splitMode === "even" ? "var(--color-accent)" : "transparent",
+                  color: splitMode === "even" ? "#fff" : "var(--color-text-secondary)" }}>
+                Evenly
+              </button>
+              <button type="button" onClick={() => handleSplitModeChange("custom")}
+                style={{ ...toggleBtn, background: splitMode === "custom" ? "var(--color-accent)" : "transparent",
+                  color: splitMode === "custom" ? "#fff" : "var(--color-text-secondary)" }}>
+                Custom
+              </button>
+            </div>
+          </div>
+
+          {/* Even split preview */}
+          {splitMode === "even" && amount && (
+            <div style={{ marginTop: "0.6rem", fontSize: "0.8rem", color: "var(--color-text-secondary)" }}>
+              {group.members.map(m => m.display_name).join(", ")} each pay{" "}
+              <strong>{(parseFloat(amount) / group.members.length).toFixed(2)} {currency}</strong>
+            </div>
+          )}
+
+          {/* Custom split inputs */}
+          {splitMode === "custom" && (
+            <div style={{ marginTop: "0.75rem" }}>
+              {customSplits.map(s => (
                 <div key={s.user_id} style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem" }}>
                   <span style={{ flex: 1, fontSize: "0.875rem" }}>{s.display_name}</span>
                   <input type="number" step="0.01" min="0" value={s.share_amount}
-                    onChange={(e) => updateSplit(s.user_id, e.target.value)}
+                    onChange={e => updateCustomSplit(s.user_id, e.target.value)}
                     style={{ ...inputStyle, width: 100, textAlign: "right" }} />
-                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)", width: 36 }}>{form.currency}</span>
+                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)", width: 36 }}>{currency}</span>
                 </div>
               ))}
               {splitsDiff > 0.01 && (
@@ -274,8 +335,9 @@ export default function GroupDetail() {
             </div>
           )}
 
-          <button type="submit" disabled={saving || splitsDiff > 0.01}
-            style={{ ...primaryBtn, marginTop: "0.75rem", width: "100%", opacity: splitsDiff > 0.01 ? 0.5 : 1 }}>
+          <button type="submit" disabled={saving || (splitMode === "custom" && splitsDiff > 0.01)}
+            style={{ ...primaryBtn, marginTop: "0.75rem", width: "100%",
+              opacity: (splitMode === "custom" && splitsDiff > 0.01) ? 0.5 : 1 }}>
             {saving ? "Saving…" : "Add expense"}
           </button>
         </form>
@@ -296,7 +358,7 @@ export default function GroupDetail() {
                   Paid by {tx.paid_by.display_name} · {tx.date}
                 </div>
                 <div style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)", marginTop: "0.4rem" }}>
-                  {tx.splits.map((s) => `${s.display_name}: ${s.share_amount} ${tx.currency}`).join(" · ")}
+                  {tx.splits.map(s => `${s.display_name}: ${s.share_amount} ${tx.currency}`).join(" · ")}
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
@@ -337,4 +399,8 @@ const inputStyle = {
   width: "100%", padding: "0.6rem 0.75rem", border: "1px solid var(--color-border)",
   borderRadius: "var(--radius-sm)", fontSize: "0.95rem", background: "var(--color-bg)",
   color: "var(--color-text-primary)", display: "block",
+};
+const toggleBtn = {
+  border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)",
+  padding: "0.4rem 0.9rem", fontSize: "0.875rem", cursor: "pointer",
 };
