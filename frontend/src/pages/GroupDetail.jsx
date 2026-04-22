@@ -17,6 +17,7 @@ export default function GroupDetail() {
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [showSettleForm, setShowSettleForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [hideSettlements, setHideSettlements] = useState(true);
 
   // Transaction form
   const [description, setDescription] = useState("");
@@ -125,33 +126,87 @@ export default function GroupDetail() {
     finally { setSaving(false); }
   };
 
+  // Given two user IDs and a currency, return the amount the payer owes the payee
+  // (positive = payer owes payee, negative = payer is owed by payee)
+  const getBalanceBetween = (payerId, payeeId, cur) => {
+    const payerBal = (balances?.find(b => b.user.id === payerId)?.currencies[cur] || 0);
+    return -payerBal; // payer's negative balance = what they owe
+  };
+
   // Open settle form and pre-fill sensible defaults from balances
   const openSettleForm = () => {
+    // Compute defaults as local variables to avoid stale state issues
+    let defaultPayerId = user?.id;
+    let defaultPayeeId = null;
+    let defaultCurrency = "USD";
+    let defaultAmount = "";
+
     if (balances && user) {
-      // Find the current user's biggest debt (negative balance) as default
       const myBalance = balances.find(b => b.user.id === user.id);
-      if (myBalance) {
-        const biggestDebt = Object.entries(myBalance.currencies)
-          .filter(([, amt]) => amt < 0)
-          .sort(([, a], [, b]) => a - b)[0];
-        if (biggestDebt) {
-          setSettleCurrency(biggestDebt[0]);
-          setSettleAmount(Math.abs(biggestDebt[1]).toFixed(2));
-          setSettlePayerId(user.id);
-          // Find who is owed the most in that currency
-          const creditor = balances
-            .filter(b => b.user.id !== user.id && (b.currencies[biggestDebt[0]] || 0) > 0)
-            .sort((a, b) => (b.currencies[biggestDebt[0]] || 0) - (a.currencies[biggestDebt[0]] || 0))[0];
-          if (creditor) setSettlePayeeId(creditor.user.id);
+
+      // Find the current user's biggest debt (most negative balance)
+      const debts = Object.entries(myBalance?.currencies || {})
+        .filter(([, amt]) => amt < 0)
+        .sort(([, a], [, b]) => a - b);
+
+      if (debts.length > 0) {
+        // I owe someone — I am the payer
+        const [cur, amt] = debts[0];
+        defaultCurrency = cur;
+        defaultAmount = Math.abs(amt).toFixed(2);
+        defaultPayerId = user.id;
+        // Find the person who has the most positive balance in this currency
+        const creditor = balances
+          .filter(b => b.user.id !== user.id && (b.currencies[cur] || 0) > 0)
+          .sort((a, b) => (b.currencies[cur] || 0) - (a.currencies[cur] || 0))[0];
+        defaultPayeeId = creditor?.user.id || group?.members.find(m => m.id !== user.id)?.id;
+      } else {
+        // I am owed — find my biggest credit and set the debtor as payer
+        const credits = Object.entries(myBalance?.currencies || {})
+          .filter(([, amt]) => amt > 0)
+          .sort(([, a], [, b]) => b - a);
+
+        if (credits.length > 0) {
+          const [cur, amt] = credits[0];
+          defaultCurrency = cur;
+          defaultAmount = Math.abs(amt).toFixed(2);
+          defaultPayeeId = user.id; // I receive
+          // Find the person who owes the most in this currency
+          const debtor = balances
+            .filter(b => b.user.id !== user.id && (b.currencies[cur] || 0) < 0)
+            .sort((a, b) => (a.currencies[cur] || 0) - (b.currencies[cur] || 0))[0];
+          defaultPayerId = debtor?.user.id || group?.members.find(m => m.id !== user.id)?.id;
+        } else {
+          // No debts — just default to first other member
+          defaultPayeeId = group?.members.find(m => m.id !== user.id)?.id;
         }
       }
-      if (!settlePayerId) setSettlePayerId(user.id);
-      if (!settlePayeeId && group?.members) {
-        const other = group.members.find(m => m.id !== user.id);
-        if (other) setSettlePayeeId(other.id);
+    }
+
+    setSettlePayerId(defaultPayerId);
+    setSettlePayeeId(defaultPayeeId);
+    setSettleCurrency(defaultCurrency);
+    setSettleAmount(defaultAmount);
+    setShowSettleForm(true);
+  };
+
+  // When payer/payee/currency changes in the settle form, auto-fill the amount
+  const handleSettlePartyChange = (field, value) => {
+    const newPayerId = field === "payer" ? parseInt(value) : settlePayerId;
+    const newPayeeId = field === "payee" ? parseInt(value) : settlePayeeId;
+    const newCurrency = field === "currency" ? value : settleCurrency;
+
+    if (field === "payer") setSettlePayerId(newPayerId);
+    if (field === "payee") setSettlePayeeId(newPayeeId);
+    if (field === "currency") setSettleCurrency(newCurrency);
+
+    if (newPayerId && newPayeeId && balances) {
+      const payerBal = balances.find(b => b.user.id === newPayerId)?.currencies[newCurrency] || 0;
+      // payer's negative balance is what they owe
+      if (payerBal < 0) {
+        setSettleAmount(Math.abs(payerBal).toFixed(2));
       }
     }
-    setShowSettleForm(true);
   };
 
   const submitSettle = async (e) => {
@@ -284,7 +339,7 @@ export default function GroupDetail() {
               <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
                 <div style={{ flex: 1 }}>
                   <label style={labelStyle}>Who paid</label>
-                  <select value={settlePayerId || ""} onChange={e => setSettlePayerId(parseInt(e.target.value))} style={inputStyle} required>
+                  <select value={settlePayerId || ""} onChange={e => handleSettlePartyChange("payer", e.target.value)} style={inputStyle} required>
                     <option value="" disabled>Select…</option>
                     {group.members.map(m => (
                       <option key={m.id} value={m.id}>{m.id === user?.id ? `${m.display_name} (you)` : m.display_name}</option>
@@ -293,7 +348,7 @@ export default function GroupDetail() {
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={labelStyle}>Who received</label>
-                  <select value={settlePayeeId || ""} onChange={e => setSettlePayeeId(parseInt(e.target.value))} style={inputStyle} required>
+                  <select value={settlePayeeId || ""} onChange={e => handleSettlePartyChange("payee", e.target.value)} style={inputStyle} required>
                     <option value="" disabled>Select…</option>
                     {group.members.filter(m => m.id !== settlePayerId).map(m => (
                       <option key={m.id} value={m.id}>{m.id === user?.id ? `${m.display_name} (you)` : m.display_name}</option>
@@ -306,7 +361,7 @@ export default function GroupDetail() {
                 <input type="number" placeholder="Amount" min="0.01" step="0.01" required
                   value={settleAmount} onChange={e => setSettleAmount(e.target.value)}
                   style={{ ...inputStyle, flex: 2 }} />
-                <select value={settleCurrency} onChange={e => setSettleCurrency(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+                <select value={settleCurrency} onChange={e => handleSettlePartyChange("currency", e.target.value)} style={{ ...inputStyle, flex: 1 }}>
                   {(currencies || ["USD", "EUR", "GBP"]).map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
@@ -323,9 +378,16 @@ export default function GroupDetail() {
       {/* Transactions */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
         <h2 style={{ fontSize: "1rem", fontWeight: 600 }}>Transactions</h2>
-        <button onClick={showTxForm ? () => setShowTxForm(false) : openTxForm} style={primaryBtn}>
-          {showTxForm ? "Cancel" : "+ Add expense"}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <button onClick={() => setHideSettlements(v => !v)}
+            style={{ ...ghostBtn, fontSize: "0.8rem", color: hideSettlements ? "var(--color-text-secondary)" : "var(--color-accent)",
+              borderColor: hideSettlements ? "var(--color-border)" : "var(--color-accent)" }}>
+            {hideSettlements ? "Show all" : "Hide settled"}
+          </button>
+          <button onClick={showTxForm ? () => setShowTxForm(false) : openTxForm} style={primaryBtn}>
+            {showTxForm ? "Cancel" : "+ Add expense"}
+          </button>
+        </div>
       </div>
 
       {showTxForm && (
@@ -401,7 +463,7 @@ export default function GroupDetail() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        {transactions?.map((tx) => (
+        {transactions?.filter(tx => hideSettlements ? (!tx.is_settlement && !tx.is_hidden) : true).map((tx) => (
           <div key={tx.id} style={{ ...card, ...(tx.is_settlement ? settlementCard : {}) }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
