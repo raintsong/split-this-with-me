@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
 import { api, getToken, setToken, clearToken } from "../hooks/useApi";
 
 const AuthContext = createContext(null);
@@ -7,21 +6,19 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const location = useLocation();
-  const navigate = useNavigate();
 
   useEffect(() => {
     // Check if we just came back from Google OAuth with a token in the URL
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(window.location.search);
     const tokenFromUrl = params.get("token");
 
     if (tokenFromUrl) {
       setToken(tokenFromUrl);
-      // Clean the token out of the URL
-      navigate("/dashboard", { replace: true });
+      // Clean the token out of the URL without triggering a re-render
+      window.history.replaceState({}, "", "/dashboard");
     }
 
-    // Now check auth using whatever token we have
+    // Check auth using whatever token we now have
     api("/auth/me")
       .then((data) => {
         if (data.authenticated) setUser(data.user);
