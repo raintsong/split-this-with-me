@@ -26,7 +26,7 @@ def list_transactions(group_id):
     group = Group.query.get_or_404(group_id)
     if current_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
-    txs = Transaction.query.filter_by(group_id=group_id).order_by(Transaction.date.desc()).all()
+    txs = Transaction.query.filter_by(group_id=group_id).order_by(Transaction.date.desc(), Transaction.created_at.desc()).all()
     return jsonify([t.to_dict() for t in txs])
 
 
@@ -124,6 +124,40 @@ def settle(group_id):
     # Payer gets credited as the one who paid, cancels their negative balance.
     db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payee_id"], share_amount=amount))
     db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payer_id"], share_amount=0))
+
+    db.session.flush()
+
+    # Check if this settlement zeros out the balance between payer and payee
+    # in this currency. If so, mark all their transactions in this group/currency as hidden.
+    currency_val = data["currency"]
+    payer_id = data["payer_id"]
+    payee_id = data["payee_id"]
+
+    # Recompute balance between just these two people in this currency
+    net = 0.0
+    all_txs = Transaction.query.filter_by(group_id=group_id).all()
+    for t in all_txs:
+        if t.currency != currency_val:
+            continue
+        for s in t.splits:
+            if s.user_id in (payer_id, payee_id):
+                share = float(s.share_amount)
+                if s.user_id == payee_id:
+                    net -= share
+                if t.paid_by_id == payee_id:
+                    net += share
+                if s.user_id == payer_id:
+                    net += share
+                if t.paid_by_id == payer_id:
+                    net -= share
+
+    # If net is effectively zero, hide all related transactions
+    if abs(net) < 0.01:
+        for t in all_txs:
+            if t.currency == currency_val:
+                involved = {s.user_id for s in t.splits} | {t.paid_by_id}
+                if payer_id in involved or payee_id in involved:
+                    t.is_hidden = True
 
     db.session.commit()
     return jsonify(tx.to_dict()), 201

@@ -65,6 +65,7 @@ class Transaction(db.Model):
     amount = db.Column(db.Numeric(12, 4), nullable=False)
     currency = db.Column(db.String(3), nullable=False, default="USD")  # ISO 4217
     is_settlement = db.Column(db.Boolean, nullable=False, default=False)
+    is_hidden = db.Column(db.Boolean, nullable=False, default=False)
     date = db.Column(db.Date, default=datetime.date.today)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
@@ -83,6 +84,7 @@ class Transaction(db.Model):
             "currency": self.currency,
             "date": self.date.isoformat(),
             "is_settlement": self.is_settlement,
+            "is_hidden": self.is_hidden,
             "splits": [s.to_dict() for s in self.splits],
         }
 
@@ -104,7 +106,3 @@ class TransactionSplit(db.Model):
             "display_name": self.user.display_name,
             "share_amount": str(self.share_amount),
         }
-# NOTE: After updating this file, run locally:
-# flask --app run db migrate -m "add is_settlement to transactions"
-# flask --app run db upgrade
-# Then commit the new migration file in migrations/versions/
