@@ -7,10 +7,13 @@ from .. import db
 groups_bp = Blueprint("groups", __name__)
 
 
-@groups_bp.route("/", methods=["GET"])
+@groups_bp.route("/admin/all", methods=["GET"])
 @login_required
-def list_groups():
-    return jsonify([g.to_dict() for g in current_user.groups])
+def admin_list_all_groups():
+    if not current_user.is_admin:
+        return jsonify({"error": "Admin access required"}), 403
+    groups = Group.query.all()
+    return jsonify([g.to_dict() for g in groups])
 
 
 @groups_bp.route("/", methods=["POST"])

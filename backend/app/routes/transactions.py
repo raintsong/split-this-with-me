@@ -14,10 +14,23 @@ SUPPORTED_CURRENCIES = [
 ]
 
 
-@transactions_bp.route("/currencies", methods=["GET"])
+@transactions_bp.route("/admin/all", methods=["GET"])
 @login_required
-def list_currencies():
-    return jsonify(SUPPORTED_CURRENCIES)
+def admin_list_all_transactions():
+    if not current_user.is_admin:
+        return jsonify({"error": "Admin access required"}), 403
+    txs = Transaction.query.order_by(Transaction.date.desc(), Transaction.created_at.desc()).all()
+    return jsonify([t.to_dict() for t in txs])
+
+
+@transactions_bp.route("/admin/group/<int:group_id>", methods=["GET"])
+@login_required
+def admin_list_group_transactions(group_id):
+    if not current_user.is_admin:
+        return jsonify({"error": "Admin access required"}), 403
+    group = Group.query.get_or_404(group_id)
+    txs = Transaction.query.filter_by(group_id=group_id).order_by(Transaction.date.desc(), Transaction.created_at.desc()).all()
+    return jsonify([t.to_dict() for t in txs])
 
 
 @transactions_bp.route("/group/<int:group_id>", methods=["GET"])

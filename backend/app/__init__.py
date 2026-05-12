@@ -17,6 +17,7 @@ def create_app():
     app = Flask(__name__)
 
     # Core config
+    app.config["FLASK_ENV"] = os.environ.get("FLASK_ENV", "production")
     app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -31,6 +32,9 @@ def create_app():
     # Google OAuth config
     app.config["GOOGLE_CLIENT_ID"] = os.environ["GOOGLE_CLIENT_ID"]
     app.config["GOOGLE_CLIENT_SECRET"] = os.environ["GOOGLE_CLIENT_SECRET"]
+    
+    # Admin config (development only)
+    app.config["ADMIN_TOKEN"] = os.environ.get("ADMIN_TOKEN", "dev-admin-token")
 
     # Session cookie config
     # In production: SameSite=None + Secure=True required for cross-origin cookies
@@ -52,9 +56,21 @@ def create_app():
     from .routes.auth import auth_bp
     from .routes.groups import groups_bp
     from .routes.transactions import transactions_bp
+    from .routes.admin import admin_bp
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(groups_bp, url_prefix="/api/groups")
     app.register_blueprint(transactions_bp, url_prefix="/api/transactions")
+    app.register_blueprint(admin_bp, url_prefix="/api/admin")
+
+    # Register CLI commands
+    @app.cli.command()
+    def seed():
+        """Seed the database with development data."""
+        if os.environ.get("FLASK_ENV") != "development":
+            print("❌ Seeding is only available in development mode")
+            return
+        from .seed import seed_dev_data
+        seed_dev_data()
 
     return app

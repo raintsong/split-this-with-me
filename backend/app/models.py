@@ -24,6 +24,7 @@ class User(UserMixin, db.Model):
     display_name = db.Column(db.String(255), nullable=False)
     google_id = db.Column(db.String(255), unique=True, nullable=False)
     avatar_url = db.Column(db.String(512))
+    is_admin = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     # Relationships
