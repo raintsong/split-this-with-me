@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useFetch, api } from "../hooks/useApi";
@@ -6,11 +6,17 @@ import { useFetch, api } from "../hooks/useApi";
 export default function GroupDetail() {
   const { groupId } = useParams();
   const { user } = useAuth();
+  const isAdminMode = useMemo(() => !!localStorage.getItem("adminToken"), []);
+  
   const { data: group, loading: groupLoading, setData: setGroup } = useFetch(`/api/groups/${groupId}`);
   const { data: transactions, loading: txLoading, setData: setTransactions } = useFetch(
-    `/api/transactions/group/${groupId}`, [groupId]
+    isAdminMode ? `/api/transactions/admin/group/${groupId}` : `/api/transactions/group/${groupId}`,
+    [groupId, isAdminMode]
   );
-  const { data: balances, setData: setBalances } = useFetch(`/api/groups/${groupId}/balances`, [groupId]);
+  const { data: balances, setData: setBalances } = useFetch(
+    isAdminMode ? null : `/api/groups/${groupId}/balances`,
+    [groupId, isAdminMode]
+  );
   const { data: currencies } = useFetch("/api/transactions/currencies");
 
   const [showTxForm, setShowTxForm] = useState(false);
@@ -261,8 +267,15 @@ export default function GroupDetail() {
 
       <div style={{ margin: "1rem 0 1.5rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
-          <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>{group.name}</h1>
-          {isCreator && (
+          <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>
+            {group.name}
+            {isAdminMode && (
+              <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--color-accent)", marginLeft: "0.5rem" }}>
+                [ADMIN]
+              </span>
+            )}
+          </h1>
+          {!isAdminMode && isCreator && (
             <button onClick={deleteGroup}
               style={{ ...ghostBtn, color: "var(--color-danger)", borderColor: "var(--color-danger)", fontSize: "0.75rem" }}>
               Delete group
@@ -276,9 +289,11 @@ export default function GroupDetail() {
       <div style={{ ...card, marginBottom: "1.5rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
           <h2 style={{ fontSize: "0.9rem", fontWeight: 600 }}>Members</h2>
-          <button onClick={() => setShowMemberForm(v => !v)} style={ghostBtn}>
-            {showMemberForm ? "Cancel" : "+ Add member"}
-          </button>
+          {!isAdminMode && (
+            <button onClick={() => setShowMemberForm(v => !v)} style={ghostBtn}>
+              {showMemberForm ? "Cancel" : "+ Add member"}
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           {group.members.map((m) => (
@@ -287,7 +302,7 @@ export default function GroupDetail() {
                 {m.display_name}
                 {m.id === group.created_by_id && <span style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginLeft: "0.4rem" }}>(creator)</span>}
               </span>
-              {isCreator && m.id !== group.created_by_id && (
+              {!isAdminMode && isCreator && m.id !== group.created_by_id && (
                 <button onClick={() => removeMember(m.id)}
                   style={{ ...ghostBtn, fontSize: "0.75rem", color: "var(--color-danger)", borderColor: "var(--color-danger)" }}>
                   Remove
@@ -296,7 +311,7 @@ export default function GroupDetail() {
             </div>
           ))}
         </div>
-        {showMemberForm && (
+        {!isAdminMode && showMemberForm && (
           <div style={{ marginTop: "1rem", borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
             <input placeholder="Search by name or email…" value={memberQuery}
               onChange={(e) => searchUsers(e.target.value)} style={inputStyle} />
@@ -326,7 +341,7 @@ export default function GroupDetail() {
       </div>
 
       {/* Balances + Settle */}
-      {balances && (
+      {!isAdminMode && balances && (
         <div style={{ ...card, marginBottom: "1.5rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
             <h2 style={{ fontSize: "0.9rem", fontWeight: 600 }}>Balances</h2>
@@ -410,13 +425,15 @@ export default function GroupDetail() {
               borderColor: hideSettlements ? "var(--color-border)" : "var(--color-accent)" }}>
             {hideSettlements ? "Show all" : "Hide settled"}
           </button>
-          <button onClick={showTxForm ? () => setShowTxForm(false) : openTxForm} style={primaryBtn}>
-            {showTxForm ? "Cancel" : "+ Add expense"}
-          </button>
+          {!isAdminMode && (
+            <button onClick={showTxForm ? () => setShowTxForm(false) : openTxForm} style={primaryBtn}>
+              {showTxForm ? "Cancel" : "+ Add expense"}
+            </button>
+          )}
         </div>
       </div>
 
-      {showTxForm && (
+      {!isAdminMode && showTxForm && (
         <form onSubmit={submitTransaction} style={{ ...card, marginBottom: "1rem" }}>
           <input placeholder="Description" required value={description}
             onChange={e => setDescription(e.target.value)} style={inputStyle} />

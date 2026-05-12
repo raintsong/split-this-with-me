@@ -14,6 +14,7 @@ export function clearToken() {
 
 export async function api(path, options = {}) {
   const token = getToken();
+  const adminToken = localStorage.getItem("adminToken");
   const headers = {
     "Content-Type": "application/json",
     ...options.headers,
@@ -21,6 +22,10 @@ export async function api(path, options = {}) {
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
   }
 
   const response = await fetch(`${BASE_URL}${path}`, {

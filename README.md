@@ -41,6 +41,16 @@ npm run dev
 # Runs at http://localhost:5173
 ```
 
+### Admin Access (Development Only)
+
+For development purposes, you can access admin functionality without logging in with Google:
+
+1. Go to `/admin` in your browser
+2. Enter the admin token: `dev-admin-token` (or set `ADMIN_TOKEN` in your `.env`)
+3. You'll see all groups and transactions across the entire application
+
+This creates a development admin user automatically and bypasses normal authentication.
+
 ---
 
 ## Deployment

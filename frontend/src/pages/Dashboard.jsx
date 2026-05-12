@@ -5,11 +5,29 @@ import { useFetch, api } from "../hooks/useApi";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
-  const { data: groups, loading, setData: setGroups } = useFetch("/api/groups/");
+  const [isAdminMode, setIsAdminMode] = useState(() => !!localStorage.getItem("adminToken"));
+  const { data: groups, loading, setData: setGroups } = useFetch(
+    isAdminMode ? "/api/groups/admin/all" : "/api/groups/",
+    [isAdminMode]
+  );
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const toggleAdminMode = () => {
+    if (isAdminMode) {
+      localStorage.removeItem("adminToken");
+      setIsAdminMode(false);
+    } else {
+      // Open admin token input
+      const token = prompt("Enter admin token:");
+      if (token) {
+        localStorage.setItem("adminToken", token);
+        setIsAdminMode(true);
+      }
+    }
+  };
 
   const createGroup = async (e) => {
     e.preventDefault();
@@ -33,18 +51,36 @@ export default function Dashboard() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
         <div>
-          <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>Splits</h1>
+          <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>
+            Splits
+            {isAdminMode && (
+              <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--color-accent)", marginLeft: "0.5rem" }}>
+                [ADMIN]
+              </span>
+            )}
+          </h1>
           <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>{user?.display_name}</p>
         </div>
-        <button onClick={logout} style={ghostBtn}>Sign out</button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button onClick={toggleAdminMode} 
+            style={{ ...ghostBtn, color: isAdminMode ? "var(--color-accent)" : "var(--color-text-secondary)",
+              borderColor: isAdminMode ? "var(--color-accent)" : "var(--color-border)" }}>
+            {isAdminMode ? "Disable Admin" : "Enable Admin"}
+          </button>
+          <button onClick={logout} style={ghostBtn}>Sign out</button>
+        </div>
       </div>
 
       {/* Groups list */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <h2 style={{ fontSize: "1rem", fontWeight: 600 }}>Your groups</h2>
-        <button onClick={() => setShowForm((v) => !v)} style={primaryBtn}>
-          {showForm ? "Cancel" : "+ New group"}
-        </button>
+        <h2 style={{ fontSize: "1rem", fontWeight: 600 }}>
+          {isAdminMode ? "All groups" : "Your groups"}
+        </h2>
+        {!isAdminMode && (
+          <button onClick={() => setShowForm((v) => !v)} style={primaryBtn}>
+            {showForm ? "Cancel" : "+ New group"}
+          </button>
+        )}
       </div>
 
       {/* New group form */}

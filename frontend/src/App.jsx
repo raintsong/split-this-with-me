@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import GroupDetail from "./pages/GroupDetail";
+import Admin from "./pages/Admin";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -27,6 +28,7 @@ function AppRoutes() {
         path="/groups/:groupId"
         element={<ProtectedRoute><GroupDetail /></ProtectedRoute>}
       />
+      <Route path="/admin" element={<Admin />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
