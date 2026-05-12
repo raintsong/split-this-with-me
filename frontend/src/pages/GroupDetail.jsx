@@ -224,11 +224,29 @@ export default function GroupDetail() {
     finally { setSaving(false); }
   };
 
+  const toggleTransactionHidden = async (tx) => {
+    try {
+      const updated = await api(`/api/transactions/${tx.id}`, {
+        method: "PATCH",
+        body: { is_hidden: !tx.is_hidden },
+      });
+      setTransactions(prev => prev.map(t => t.id === tx.id ? updated : t));
+    } catch (err) { alert(err.message); }
+  };
+
   const deleteTransaction = async (txId) => {
     if (!confirm("Delete this transaction?")) return;
     await api(`/api/transactions/${txId}`, { method: "DELETE" });
     setTransactions(prev => prev.filter(t => t.id !== txId));
     setBalances(await api(`/api/groups/${groupId}/balances`));
+  };
+
+  const deleteGroup = async () => {
+    if (!confirm(`Delete group "${group.name}" and all its transactions? This cannot be undone.`)) return;
+    try {
+      await api(`/api/groups/${groupId}`, { method: "DELETE" });
+      window.location.href = "/dashboard";
+    } catch (err) { alert(err.message); }
   };
 
   if (groupLoading) return <div style={{ padding: "2rem" }}>Loading…</div>;
@@ -242,7 +260,15 @@ export default function GroupDetail() {
       <Link to="/dashboard" style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>← Dashboard</Link>
 
       <div style={{ margin: "1rem 0 1.5rem" }}>
-        <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>{group.name}</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
+          <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>{group.name}</h1>
+          {isCreator && (
+            <button onClick={deleteGroup}
+              style={{ ...ghostBtn, color: "var(--color-danger)", borderColor: "var(--color-danger)", fontSize: "0.75rem" }}>
+              Delete group
+            </button>
+          )}
+        </div>
         {group.description && <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>{group.description}</p>}
       </div>
 
@@ -463,8 +489,8 @@ export default function GroupDetail() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        {transactions?.filter(tx => hideSettlements ? (!tx.is_settlement && !tx.is_hidden) : true).map((tx) => (
-          <div key={tx.id} style={{ ...card, ...(tx.is_settlement ? settlementCard : {}) }}>
+        {transactions?.filter(tx => hideSettlements ? (!tx.is_settlement && !tx.is_hidden) : !tx.is_hidden).map((tx) => (
+          <div key={tx.id} style={{ ...card, ...(tx.is_settlement ? settlementCard : {}), opacity: tx.is_hidden ? 0.6 : 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
                 {tx.is_settlement && (
@@ -487,10 +513,17 @@ export default function GroupDetail() {
                 <div style={{ fontWeight: 600, color: tx.is_settlement ? "var(--color-success)" : "inherit" }}>
                   {Number(tx.amount).toFixed(2)} {tx.currency}
                 </div>
-                <button onClick={() => deleteTransaction(tx.id)}
-                  style={{ ...ghostBtn, fontSize: "0.75rem", marginTop: "0.4rem", color: "var(--color-danger)", borderColor: "var(--color-danger)" }}>
-                  Delete
-                </button>
+                <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.4rem", justifyContent: "flex-end" }}>
+                  <button onClick={() => toggleTransactionHidden(tx)}
+                    style={{ ...ghostBtn, fontSize: "0.75rem", color: tx.is_hidden ? "var(--color-accent)" : "var(--color-text-secondary)", 
+                      borderColor: tx.is_hidden ? "var(--color-accent)" : "var(--color-border)" }}>
+                    {tx.is_hidden ? "Unhide" : "Hide"}
+                  </button>
+                  <button onClick={() => deleteTransaction(tx.id)}
+                    style={{ ...ghostBtn, fontSize: "0.75rem", color: "var(--color-danger)", borderColor: "var(--color-danger)" }}>
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           </div>

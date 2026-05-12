@@ -161,6 +161,23 @@ def settle(group_id):
     return jsonify(tx.to_dict()), 201
 
 
+@transactions_bp.route("/<int:tx_id>", methods=["PATCH"])
+@login_required
+def update_transaction(tx_id):
+    tx = Transaction.query.get_or_404(tx_id)
+    group = Group.query.get(tx.group_id)
+    if current_user not in group.members:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    data = request.get_json()
+    
+    if "is_hidden" in data:
+        tx.is_hidden = bool(data["is_hidden"])
+    
+    db.session.commit()
+    return jsonify(tx.to_dict())
+
+
 @transactions_bp.route("/<int:tx_id>", methods=["DELETE"])
 @login_required
 def delete_transaction(tx_id):
