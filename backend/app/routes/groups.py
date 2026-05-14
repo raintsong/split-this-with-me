@@ -44,7 +44,7 @@ def create_group():
 @login_required
 def get_group(group_id):
     group = Group.query.get_or_404(group_id)
-    if current_user not in group.members:
+    if not current_user.is_admin and current_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
     return jsonify(group.to_dict())
 
@@ -131,7 +131,7 @@ def search_users():
 def get_balances(group_id):
     """Returns net balance per user per currency within the group."""
     group = Group.query.get_or_404(group_id)
-    if current_user not in group.members:
+    if not current_user.is_admin and current_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
 
     balances = {m.id: {"user": {"id": m.id, "display_name": m.display_name}, "currencies": {}} for m in group.members}

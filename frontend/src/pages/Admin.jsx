@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useFetch, api } from "../hooks/useApi";
 
@@ -8,22 +9,33 @@ export default function Admin() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [stats, setStats] = useState(null);
   const [seeding, setSeeding] = useState(false);
+  const [adminError, setAdminError] = useState(null);
   
+  const adminHeaders = adminToken ? { headers: { "X-Admin-Token": adminToken } } : {};
+
   const { data: allGroups, loading: groupsLoading, setData: setAllGroups } = useFetch(
     isAdminMode ? "/api/groups/admin/all" : null,
-    [isAdminMode]
+    [isAdminMode, adminToken],
+    adminHeaders
   );
   const { data: allTransactions, loading: txLoading } = useFetch(
     isAdminMode ? "/api/transactions/admin/all" : null,
-    [isAdminMode]
+    [isAdminMode, adminToken],
+    adminHeaders
   );
 
   useEffect(() => {
     if (isAdminMode) {
       // Fetch stats when in admin mode
-      api("/api/admin/stats").then(setStats).catch(() => {});
+      const headers = adminToken ? { "X-Admin-Token": adminToken } : undefined;
+      api("/api/admin/stats", { headers })
+        .then(setStats)
+        .catch((err) => {
+          console.error("Failed to fetch admin stats:", err);
+          setStats(null);
+        });
     }
-  }, [isAdminMode]);
+  }, [isAdminMode, adminToken]);
 
   const enableAdminMode = async () => {
     try {
@@ -34,7 +46,7 @@ export default function Admin() {
       setIsAdminMode(true);
       localStorage.setItem("adminToken", adminToken);
     } catch (err) {
-      alert("Invalid admin token");
+      alert("Failed to enable admin mode: " + (err.message || "Invalid admin token"));
     }
   };
 
@@ -48,11 +60,12 @@ export default function Admin() {
     if (!confirm("This will clear all data and create fresh test data. Continue?")) return;
     setSeeding(true);
     try {
-      await api("/api/admin/seed", { method: "POST" });
+      const headers = adminToken ? { "X-Admin-Token": adminToken } : undefined;
+      await api("/api/admin/seed", { method: "POST", headers });
       alert("Database seeded successfully!");
       // Refresh groups and stats
-      setStats(await api("/api/admin/stats"));
-      const groups = await api("/api/groups/admin/all");
+      setStats(await api("/api/admin/stats", { headers }));
+      const groups = await api("/api/groups/admin/all", { headers });
       setAllGroups(groups);
     } catch (err) {
       alert("Error seeding database: " + err.message);
@@ -64,10 +77,22 @@ export default function Admin() {
   // Auto-enable if token exists
   useEffect(() => {
     const savedToken = localStorage.getItem("adminToken");
-    if (savedToken) {
-      setAdminToken(savedToken);
-      setIsAdminMode(true);
-    }
+    if (!savedToken) return;
+
+    api("/api/groups/admin/all", {
+      headers: { "X-Admin-Token": savedToken }
+    })
+      .then(() => {
+        setAdminToken(savedToken);
+        setIsAdminMode(true);
+        setAdminError(null);
+      })
+      .catch(() => {
+        localStorage.removeItem("adminToken");
+        setAdminToken("");
+        setIsAdminMode(false);
+        setAdminError("Saved admin token is invalid. Please enter a valid token.");
+      });
   }, []);
 
   return (
@@ -98,6 +123,9 @@ export default function Admin() {
               Enable Admin
             </button>
           </div>
+          {adminError && (
+            <p style={{ color: "var(--color-danger)", marginTop: "0.75rem" }}>{adminError}</p>
+          )}
           <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
             Default development token: <code>dev-admin-token</code>
           </p>
@@ -107,6 +135,10 @@ export default function Admin() {
           <button onClick={disableAdminMode} style={{ ...ghostBtn, color: "var(--color-danger)", borderColor: "var(--color-danger)" }}>
             Disable Admin Mode
           </button>
+          <div style={{ fontSize: "0.9rem", color: "var(--color-text-secondary)", marginTop: "1rem" }}>
+            Admin mode is active using the saved token from your browser storage.
+            Click disable to enter a different token manually.
+          </div>
 
           {/* Development Tools */}
           <div style={{ ...card, marginTop: "2rem", marginBottom: "2rem", borderColor: "var(--color-accent)", background: "rgba(var(--color-accent-rgb), 0.05)" }}>
@@ -153,16 +185,18 @@ export default function Admin() {
             ) : (
               <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
                 {allGroups?.map((group) => (
-                  <div key={group.id} style={{ ...card, padding: "1rem" }}>
-                    <h3 style={{ fontWeight: 600 }}>{group.name}</h3>
-                    <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>{group.description}</p>
-                    <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)" }}>
-                      Created by: {group.members.find(m => m.id === group.created_by_id)?.display_name}
-                    </p>
-                    <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)" }}>
-                      Members: {group.members.map(m => m.display_name).join(", ")}
-                    </p>
-                  </div>
+                  <Link key={group.id} to={`/groups/${group.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                    <div style={{ ...card, padding: "1rem" }}>
+                      <h3 style={{ fontWeight: 600 }}>{group.name}</h3>
+                      <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>{group.description}</p>
+                      <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)" }}>
+                        Created by: {group.members.find(m => m.id === group.created_by_id)?.display_name}
+                      </p>
+                      <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)" }}>
+                        Members: {group.members.map(m => m.display_name).join(", ")}
+                      </p>
+                    </div>
+                  </Link>
                 ))}
               </div>
             )}

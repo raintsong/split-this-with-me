@@ -14,7 +14,12 @@ def jwt_or_login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         # Development admin bypass
-        if current_app.config.get("FLASK_ENV") != "production":
+        is_dev_mode = (
+            current_app.config.get("FLASK_ENV") != "production"
+            or current_app.debug
+            or current_app.config.get("ENV") == "development"
+        )
+        if is_dev_mode:
             admin_token = request.headers.get("X-Admin-Token")
             if admin_token == current_app.config.get("ADMIN_TOKEN", "dev-admin-token"):
                 # Create a mock admin user for development

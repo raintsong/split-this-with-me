@@ -6,9 +6,14 @@ import { useFetch, api } from "../hooks/useApi";
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const [isAdminMode, setIsAdminMode] = useState(() => !!localStorage.getItem("adminToken"));
+  const adminHeaders = localStorage.getItem("adminToken")
+    ? { headers: { "X-Admin-Token": localStorage.getItem("adminToken") } }
+    : {};
+
   const { data: groups, loading, setData: setGroups } = useFetch(
     isAdminMode ? "/api/groups/admin/all" : "/api/groups/",
-    [isAdminMode]
+    [isAdminMode],
+    adminHeaders
   );
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");

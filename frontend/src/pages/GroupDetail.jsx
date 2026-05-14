@@ -9,15 +9,26 @@ export default function GroupDetail() {
   const isAdminMode = useMemo(() => !!localStorage.getItem("adminToken"), []);
   
   const { data: group, loading: groupLoading, setData: setGroup } = useFetch(`/api/groups/${groupId}`);
+  const transactionEndpoint = isAdminMode ? `/api/transactions/admin/group/${groupId}` : `/api/transactions/group/${groupId}`;
   const { data: transactions, loading: txLoading, setData: setTransactions } = useFetch(
-    isAdminMode ? `/api/transactions/admin/group/${groupId}` : `/api/transactions/group/${groupId}`,
+    transactionEndpoint,
     [groupId, isAdminMode]
   );
   const { data: balances, setData: setBalances } = useFetch(
-    isAdminMode ? null : `/api/groups/${groupId}/balances`,
+    `/api/groups/${groupId}/balances`,
     [groupId, isAdminMode]
   );
   const { data: currencies } = useFetch("/api/transactions/currencies");
+
+  const refreshTransactions = async () => {
+    const txs = await api(transactionEndpoint);
+    setTransactions(txs);
+    return txs;
+  };
+
+  const refreshBalances = async () => {
+    setBalances(await api(`/api/groups/${groupId}/balances`));
+  };
 
   const [showTxForm, setShowTxForm] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
@@ -39,6 +50,13 @@ export default function GroupDetail() {
   const [settlePayeeId, setSettlePayeeId] = useState(null);
   const [settleAmount, setSettleAmount] = useState("");
   const [settleCurrency, setSettleCurrency] = useState("USD");
+
+  const settleAmountValue = parseFloat(settleAmount) || 0;
+  const settlePayerBalance = balances?.find(b => b.user.id === settlePayerId)?.currencies[settleCurrency] || 0;
+  const settlePayeeBalance = balances?.find(b => b.user.id === settlePayeeId)?.currencies[settleCurrency] || 0;
+  const settleBalanceMismatch = settlePayerId && settlePayeeId && (settlePayerBalance >= 0 || settlePayeeBalance <= 0);
+  const settleMaxAmount = Math.min(Math.abs(settlePayerBalance), settlePayeeBalance);
+  const settleAmountTooHigh = settleAmount && settleMaxAmount >= 0 && settleAmountValue > settleMaxAmount + 0.01;
 
   // Member search
   const [memberQuery, setMemberQuery] = useState("");
@@ -82,7 +100,9 @@ export default function GroupDetail() {
 
   const openTxForm = () => {
     if (group) {
-      setPaidById(user?.id);
+      const memberIds = group.members.map((m) => m.id);
+      const defaultPaidBy = user && memberIds.includes(user.id) ? user.id : group.members[0]?.id;
+      setPaidById(defaultPaidBy);
       setCustomSplits(group.members.map(m => ({ user_id: m.id, display_name: m.display_name, share_amount: "0" })));
     }
     setShowTxForm(true);
@@ -142,12 +162,15 @@ export default function GroupDetail() {
   // Open settle form and pre-fill sensible defaults from balances
   const openSettleForm = () => {
     // Compute defaults as local variables to avoid stale state issues
-    let defaultPayerId = user?.id;
+    const memberIds = group?.members.map((m) => m.id) || [];
+    const currentUserIsMember = user && memberIds.includes(user.id);
+    const firstMemberId = group?.members?.[0]?.id || null;
+    let defaultPayerId = currentUserIsMember ? user.id : firstMemberId;
     let defaultPayeeId = null;
     let defaultCurrency = "USD";
     let defaultAmount = "";
 
-    if (balances && user) {
+    if (balances && currentUserIsMember) {
       const myBalance = balances.find(b => b.user.id === user.id);
 
       // Find the current user's biggest debt (most negative balance)
@@ -184,9 +207,12 @@ export default function GroupDetail() {
           defaultPayerId = debtor?.user.id || group?.members.find(m => m.id !== user.id)?.id;
         } else {
           // No debts — just default to first other member
-          defaultPayeeId = group?.members.find(m => m.id !== user.id)?.id;
+          defaultPayeeId = group?.members.find(m => m.id !== user.id)?.id || firstMemberId;
         }
       }
+    } else {
+      // Admin is not a group member: default to first two members
+      defaultPayeeId = group?.members.find(m => m.id !== defaultPayerId)?.id || defaultPayerId;
     }
 
     setSettlePayerId(defaultPayerId);
@@ -219,14 +245,19 @@ export default function GroupDetail() {
     e.preventDefault();
     setSaving(true);
     try {
-      const tx = await api(`/api/transactions/group/${groupId}/settle`, {
+      await api(`/api/transactions/group/${groupId}/settle`, {
         method: "POST",
         body: { payer_id: settlePayerId, payee_id: settlePayeeId, amount: parseFloat(settleAmount), currency: settleCurrency },
       });
-      setTransactions(prev => [tx, ...(prev || [])]);
+      await refreshTransactions();
+      await refreshBalances();
       setShowSettleForm(false);
-      setBalances(await api(`/api/groups/${groupId}/balances`));
-    } catch (err) { alert(err.message); }
+    } catch (err) {
+      const details = err.payer_id || err.payee_id ?
+        `\nDetails: payer_id=${err.payer_id}, payee_id=${err.payee_id}, group_members=[${(err.group_member_ids || []).join(",")}]` : "";
+      alert(err.message + details);
+      console.error("Settle error details:", err);
+    }
     finally { setSaving(false); }
   };
 
@@ -243,8 +274,8 @@ export default function GroupDetail() {
   const deleteTransaction = async (txId) => {
     if (!confirm("Delete this transaction?")) return;
     await api(`/api/transactions/${txId}`, { method: "DELETE" });
-    setTransactions(prev => prev.filter(t => t.id !== txId));
-    setBalances(await api(`/api/groups/${groupId}/balances`));
+    await refreshTransactions();
+    await refreshBalances();
   };
 
   const deleteGroup = async () => {
@@ -341,7 +372,7 @@ export default function GroupDetail() {
       </div>
 
       {/* Balances + Settle */}
-      {!isAdminMode && balances && (
+      {balances && (
         <div style={{ ...card, marginBottom: "1.5rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
             <h2 style={{ fontSize: "0.9rem", fontWeight: 600 }}>Balances</h2>
@@ -374,12 +405,12 @@ export default function GroupDetail() {
           {showSettleForm && (
             <form onSubmit={submitSettle} style={{ marginTop: "1rem", borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
               <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)", marginBottom: "0.75rem" }}>
-                Record a payment between two members to clear their balance.
+                Record a payment between two members to clear a debt. The payer is the member sending money, and the receiver is the member being paid.
               </p>
 
               <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Who paid</label>
+                  <label style={labelStyle}>Who is paying</label>
                   <select value={settlePayerId || ""} onChange={e => handleSettlePartyChange("payer", e.target.value)} style={inputStyle} required>
                     <option value="" disabled>Select…</option>
                     {group.members.map(m => (
@@ -388,7 +419,7 @@ export default function GroupDetail() {
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Who received</label>
+                  <label style={labelStyle}>Who is receiving</label>
                   <select value={settlePayeeId || ""} onChange={e => handleSettlePartyChange("payee", e.target.value)} style={inputStyle} required>
                     <option value="" disabled>Select…</option>
                     {group.members.filter(m => m.id !== settlePayerId).map(m => (
@@ -407,8 +438,18 @@ export default function GroupDetail() {
                 </select>
               </div>
 
-              <button type="submit" disabled={saving} style={{ ...primaryBtn, marginTop: "0.75rem", width: "100%",
-                background: "var(--color-success)" }}>
+              {settleBalanceMismatch && (
+                <p style={{ fontSize: "0.8rem", color: "var(--color-danger)", marginTop: "0.5rem" }}>
+                  The selected payer must owe money and the receiver must be owed money in {settleCurrency}.
+                </p>
+              )}
+              {settleAmountTooHigh && !settleBalanceMismatch && (
+                <p style={{ fontSize: "0.8rem", color: "var(--color-danger)", marginTop: "0.5rem" }}>
+                  Amount exceeds the outstanding balance between these members ({settleMaxAmount.toFixed(2)} {settleCurrency}).
+                </p>
+              )}
+              <button type="submit" disabled={saving || settleBalanceMismatch || settleAmountTooHigh} style={{ ...primaryBtn, marginTop: "0.75rem", width: "100%",
+                background: "var(--color-success)", opacity: (settleBalanceMismatch || settleAmountTooHigh) ? 0.6 : 1 }}>
                 {saving ? "Recording…" : "Record payment"}
               </button>
             </form>
@@ -506,7 +547,7 @@ export default function GroupDetail() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        {transactions?.filter(tx => hideSettlements ? (!tx.is_settlement && !tx.is_hidden) : !tx.is_hidden).map((tx) => (
+        {transactions?.filter(tx => hideSettlements ? (!tx.is_settlement && !tx.is_hidden) : true).map((tx) => (
           <div key={tx.id} style={{ ...card, ...(tx.is_settlement ? settlementCard : {}), opacity: tx.is_hidden ? 0.6 : 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>

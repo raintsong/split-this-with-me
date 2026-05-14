@@ -1,13 +1,14 @@
 """Development data seeding script."""
 import datetime
 from . import db
-from .models import User, Group, Transaction, TransactionSplit
+from .models import User, Group, Transaction, TransactionSplit, group_members
 
 
 def seed_dev_data():
     """Create development test data."""
     
-    # Clear existing data
+    # Clear existing data, including association rows that bulk deletes do not cascade.
+    db.session.execute(group_members.delete())
     db.session.query(TransactionSplit).delete()
     db.session.query(Transaction).delete()
     db.session.query(Group).delete()

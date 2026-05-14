@@ -37,7 +37,9 @@ export async function api(path, options = {}) {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Request failed");
+    const error = new Error(err.error || "Request failed");
+    Object.assign(error, err);
+    throw error;
   }
 
   if (response.status === 204) return null;
@@ -46,7 +48,7 @@ export async function api(path, options = {}) {
 
 import { useState, useEffect } from "react";
 
-export function useFetch(path, deps = []) {
+export function useFetch(path, deps = [], options = {}) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,11 +56,11 @@ export function useFetch(path, deps = []) {
   useEffect(() => {
     if (!path) return;
     setLoading(true);
-    api(path)
+    api(path, options)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, deps);
+  }, [path, ...deps, JSON.stringify(options)]);
 
   return { data, loading, error, setData };
 }

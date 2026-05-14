@@ -17,7 +17,8 @@ def create_app():
     app = Flask(__name__)
 
     # Core config
-    app.config["FLASK_ENV"] = os.environ.get("FLASK_ENV", "production")
+    app.config["FLASK_ENV"] = os.environ.get("FLASK_ENV", "development")
+    app.config["ENV"] = os.environ.get("ENV", app.config["FLASK_ENV"])
     app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -45,7 +46,12 @@ def create_app():
     app.config["SESSION_COOKIE_HTTPONLY"] = True
 
     # CORS — only allow requests from your frontend
-    CORS(app, supports_credentials=True, origins=[os.environ.get("FRONTEND_URL", "http://localhost:5173")])
+    CORS(
+        app,
+        supports_credentials=True,
+        origins=[os.environ.get("FRONTEND_URL", "http://localhost:5173")],
+        allow_headers=["Content-Type", "Authorization", "X-Admin-Token"],
+    )
 
     # Init extensions
     db.init_app(app)

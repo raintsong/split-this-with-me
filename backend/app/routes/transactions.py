@@ -33,6 +33,12 @@ def admin_list_group_transactions(group_id):
     return jsonify([t.to_dict() for t in txs])
 
 
+@transactions_bp.route("/currencies", methods=["GET"])
+@login_required
+def list_currencies():
+    return jsonify(SUPPORTED_CURRENCIES)
+
+
 @transactions_bp.route("/group/<int:group_id>", methods=["GET"])
 @login_required
 def list_transactions(group_id):
@@ -47,7 +53,7 @@ def list_transactions(group_id):
 @login_required
 def create_transaction(group_id):
     group = Group.query.get_or_404(group_id)
-    if current_user not in group.members:
+    if not current_user.is_admin and current_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
 
     data = request.get_json()
@@ -96,7 +102,7 @@ def settle(group_id):
     in a specific currency, zeroing out that portion of the balance.
     """
     group = Group.query.get_or_404(group_id)
-    if current_user not in group.members:
+    if not current_user.is_admin and current_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
 
     data = request.get_json()
@@ -108,51 +114,34 @@ def settle(group_id):
     if data["currency"] not in SUPPORTED_CURRENCIES:
         return jsonify({"error": f"Unsupported currency: {data['currency']}"}), 400
 
-    payer = Group.query.get(group_id)  # just to validate members below
-    payer_user = next((m for m in group.members if m.id == data["payer_id"]), None)
-    payee_user = next((m for m in group.members if m.id == data["payee_id"]), None)
+    try:
+        payer_id = int(data["payer_id"])
+        payee_id = int(data["payee_id"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "payer_id and payee_id must be valid user IDs"}), 400
+
+    payer_user = next((m for m in group.members if m.id == payer_id), None)
+    payee_user = next((m for m in group.members if m.id == payee_id), None)
 
     if not payer_user or not payee_user:
-        return jsonify({"error": "Both users must be members of this group"}), 400
+        return jsonify({
+            "error": "Both users must be members of this group",
+            "payer_id": payer_id,
+            "payee_id": payee_id,
+            "group_member_ids": [m.id for m in group.members],
+        }), 400
+
+    if payer_id == payee_id:
+        return jsonify({"error": "Payer and receiver must be different users"}), 400
 
     amount = float(data["amount"])
+    if amount <= 0:
+        return jsonify({"error": "Amount must be greater than zero"}), 400
 
-    # Settlement: payer sends money to payee.
-    # paid_by = payer (they are sending the money).
-    # Payee holds the full split — this deducts from payee's positive balance
-    # and credits the payer, netting both toward zero.
-    tx = Transaction(
-        group_id=group_id,
-        paid_by_id=data["payer_id"],  # payer sent the money
-        description=f"Settlement: {payer_user.display_name} → {payee_user.display_name}",
-        amount=amount,
-        currency=data["currency"],
-        is_settlement=True,
-        date=datetime.date.today(),
-    )
-    db.session.add(tx)
-    db.session.flush()
-
-    # Payee holds the full split — cancels their positive balance.
-    # Payer gets credited as the one who paid, cancels their negative balance.
-    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payee_id"], share_amount=amount))
-    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=data["payer_id"], share_amount=0))
-
-    db.session.commit()
-
-    # After committing, recompute the balance between payer and payee in this currency
-    # using the same logic as the main balance endpoint.
-    # If the net is now zero, mark all related transactions as hidden.
-    currency_val = data["currency"]
-    payer_id = data["payer_id"]
-    payee_id = data["payee_id"]
-
-    # Build per-user balance using standard logic
-    balances = {payer_id: 0.0, payee_id: 0.0}
-    all_txs = Transaction.query.filter_by(group_id=group_id).all()
-
-    for t in all_txs:
-        if t.currency != currency_val:
+    # Check the requested settlement against current group balances in this currency.
+    balances = {m.id: 0.0 for m in group.members}
+    for t in group.transactions:
+        if t.currency != data["currency"]:
             continue
         for s in t.splits:
             uid = s.user_id
@@ -162,14 +151,92 @@ def settle(group_id):
             if t.paid_by_id in balances:
                 balances[t.paid_by_id] += share
 
-    # Both balances should be equal and opposite — check if they net to zero
-    if abs(balances[payer_id]) < 0.01 and abs(balances[payee_id]) < 0.01:
+    payer_balance = balances.get(payer_id, 0.0)
+    payee_balance = balances.get(payee_id, 0.0)
+
+    if payer_balance >= 0 or payee_balance <= 0:
+        return jsonify({
+            "error": "Selected payer/payee do not match current balances in this currency",
+            "payer_balance": payer_balance,
+            "payee_balance": payee_balance,
+            "currency": data["currency"],
+        }), 400
+
+    max_amount = min(abs(payer_balance), payee_balance)
+    if amount > max_amount + 0.01:
+        return jsonify({
+            "error": "Settlement amount exceeds the outstanding balance between these members",
+            "max_amount": max_amount,
+        }), 400
+
+    tx = Transaction(
+        group_id=group_id,
+        paid_by_id=payer_id,
+        description=f"Settlement: {payer_user.display_name} → {payee_user.display_name}",
+        amount=amount,
+        currency=data["currency"],
+        is_settlement=True,
+        date=datetime.date.today(),
+    )
+    db.session.add(tx)
+    db.session.flush()
+
+    # Payee receives the payment in the split, while the payer records zero share to move their balance.
+    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=payee_id, share_amount=amount))
+    db.session.add(TransactionSplit(transaction_id=tx.id, user_id=payer_id, share_amount=0))
+
+    db.session.commit()
+
+    # Recompute the group's balances after this settlement.
+    # If the entire group is now fully settled (all balances zero across all currencies), hide every transaction.
+    group_balances = {m.id: {} for m in group.members}
+    all_txs = Transaction.query.filter_by(group_id=group_id).all()
+
+    for t in all_txs:
+        currency = t.currency
+        payer_id = t.paid_by_id
+        for s in t.splits:
+            uid = s.user_id
+            share = float(s.share_amount)
+            group_balances[uid].setdefault(currency, 0)
+            group_balances[uid][currency] -= share
+            group_balances[payer_id].setdefault(currency, 0)
+            group_balances[payer_id][currency] += share
+
+    fully_settled = all(
+        all(abs(amount) < 0.01 for amount in user_balances.values())
+        for user_balances in group_balances.values()
+    )
+
+    if fully_settled:
         for t in all_txs:
-            if t.currency == currency_val:
-                involved = {s.user_id for s in t.splits} | {t.paid_by_id}
-                if payer_id in involved and payee_id in involved:
-                    t.is_hidden = True
+            t.is_hidden = True
         db.session.commit()
+    else:
+        # If only this settlement pair is now balanced in this currency, hide their related history.
+        currency_val = data["currency"]
+        payer_id = data["payer_id"]
+        payee_id = data["payee_id"]
+
+        balances = {payer_id: 0.0, payee_id: 0.0}
+        for t in all_txs:
+            if t.currency != currency_val:
+                continue
+            for s in t.splits:
+                uid = s.user_id
+                share = float(s.share_amount)
+                if uid in balances:
+                    balances[uid] -= share
+                if t.paid_by_id in balances:
+                    balances[t.paid_by_id] += share
+
+        if abs(balances[payer_id]) < 0.01 and abs(balances[payee_id]) < 0.01:
+            for t in all_txs:
+                if t.currency == currency_val:
+                    involved = {s.user_id for s in t.splits} | {t.paid_by_id}
+                    if payer_id in involved and payee_id in involved:
+                        t.is_hidden = True
+            db.session.commit()
 
     return jsonify(tx.to_dict()), 201
 
