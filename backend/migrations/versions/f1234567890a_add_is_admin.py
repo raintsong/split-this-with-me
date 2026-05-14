@@ -1,6 +1,6 @@
 """add is_admin to users
 
-Revision ID: f1234567890a_add_is_admin_to_users
+Revision ID: f1234567890a_add_is_admin
 Revises: ebe67f1b19a0
 Create Date: 2026-05-12 12:00:00.000000
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'f1234567890a_add_is_admin_to_users'
+revision = 'f1234567890a_add_is_admin'
 down_revision = 'ebe67f1b19a0'
 branch_labels = None
 depends_on = None
