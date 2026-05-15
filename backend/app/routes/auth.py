@@ -54,30 +54,37 @@ def login():
 
 @auth_bp.route("/callback")
 def callback():
-    token = oauth.google.authorize_access_token()
-    userinfo = token.get("userinfo")
+    try:
+        redirect_uri = url_for("auth.callback", _external=True)
+        token = oauth.google.authorize_access_token(redirect_uri=redirect_uri)
+        userinfo = (token or {}).get("userinfo")
 
-    if not userinfo:
-        return jsonify({"error": "Failed to get user info from Google"}), 400
+        if not userinfo:
+            current_app.logger.error("Google callback succeeded but no userinfo was returned: %s", token)
+            return jsonify({"error": "Failed to get user info from Google"}), 400
 
-    # Find or create user
-    user = User.query.filter_by(google_id=userinfo["sub"]).first()
-    if not user:
-        user = User(
-            google_id=userinfo["sub"],
-            email=userinfo["email"],
-            display_name=userinfo.get("name", userinfo["email"]),
-            avatar_url=userinfo.get("picture"),
-        )
-        db.session.add(user)
-        db.session.commit()
+        # Find or create user
+        user = User.query.filter_by(google_id=userinfo["sub"]).first()
+        if not user:
+            user = User(
+                google_id=userinfo["sub"],
+                email=userinfo["email"],
+                display_name=userinfo.get("name", userinfo["email"]),
+                avatar_url=userinfo.get("picture"),
+            )
+            db.session.add(user)
+            db.session.commit()
 
-    login_user(user)
+        login_user(user)
 
-    # Generate JWT and redirect to frontend with token in URL
-    jwt_token = generate_token(user)
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173")
-    return redirect(f"{frontend_url}/dashboard?token={jwt_token}")
+        jwt_token = generate_token(user)
+        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+        return redirect(f"{frontend_url}/dashboard?token={jwt_token}")
+
+    except Exception as exc:
+        current_app.logger.exception("Google auth callback failed")
+        # Return JSON error in the browser so the failure is visible in logs and on-screen.
+        return jsonify({"error": "Google login failed", "details": str(exc)}), 500
 
 
 @auth_bp.route("/logout", methods=["POST"])
