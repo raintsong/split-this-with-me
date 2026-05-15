@@ -16,6 +16,14 @@ def admin_list_all_groups():
     return jsonify([g.to_dict() for g in groups])
 
 
+@groups_bp.route("/", methods=["GET"])
+@login_required
+def list_groups():
+    """Return all groups that the current user belongs to."""
+    groups = current_user.groups
+    return jsonify([g.to_dict() for g in groups])
+
+
 @groups_bp.route("/", methods=["POST"])
 @login_required
 def create_group():
