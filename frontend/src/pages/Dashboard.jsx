@@ -10,6 +10,10 @@ export default function Dashboard() {
     ? { headers: { "X-Admin-Token": localStorage.getItem("adminToken") } }
     : {};
 
+  // Only allow admin mode in development (localhost API)
+  const isDevMode = import.meta.env.VITE_API_URL?.includes("localhost");
+  const canToggleAdmin = isDevMode;
+
   const { data: groups, loading, setData: setGroups } = useFetch(
     isAdminMode ? "/api/groups/admin/all" : "/api/groups/",
     [isAdminMode],
@@ -67,11 +71,13 @@ export default function Dashboard() {
           <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>{user?.display_name}</p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button onClick={toggleAdminMode} 
-            style={{ ...ghostBtn, color: isAdminMode ? "var(--color-accent)" : "var(--color-text-secondary)",
-              borderColor: isAdminMode ? "var(--color-accent)" : "var(--color-border)" }}>
-            {isAdminMode ? "Disable Admin" : "Enable Admin"}
-          </button>
+          {canToggleAdmin && (
+            <button onClick={toggleAdminMode} 
+              style={{ ...ghostBtn, color: isAdminMode ? "var(--color-accent)" : "var(--color-text-secondary)",
+                borderColor: isAdminMode ? "var(--color-accent)" : "var(--color-border)" }}>
+              {isAdminMode ? "Disable Admin" : "Enable Admin"}
+            </button>
+          )}
           <button onClick={logout} style={ghostBtn}>Sign out</button>
         </div>
       </div>
