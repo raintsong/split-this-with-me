@@ -1,11 +1,11 @@
-# Splits — shared expense tracker
+# Split this with me? — shared expense tracker
 
-A private Splitwise-style app built with Flask + React, Google OAuth, multi-currency support, and group management.
+A private cost-splitting app built with Flask + React, Google OAuth, multi-currency support, and group management.
 
 ## Stack
 - **Backend**: Flask + SQLAlchemy + Authlib (Google OAuth)
 - **Frontend**: React + Vite
-- **Database**: SQLite (dev) / PostgreSQL (production via Railway)
+- **Database**: Supabase
 - **Hosting**: Railway (backend) + Vercel (frontend)
 
 ---

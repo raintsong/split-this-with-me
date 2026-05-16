@@ -57,7 +57,7 @@ export default function Dashboard() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
         <div>
           <h1 style={{ fontSize: "1.4rem", fontWeight: 600 }}>
-            Splits
+            Split this with me?
             {isAdminMode && (
               <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--color-accent)", marginLeft: "0.5rem" }}>
                 [ADMIN]
