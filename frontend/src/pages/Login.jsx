@@ -19,7 +19,7 @@ export default function Login() {
         textAlign: "center",
         boxShadow: "var(--shadow-md)",
       }}>
-        <h1 style={{ fontSize: "1.6rem", fontWeight: 600, marginBottom: "0.5rem" }}>Splits</h1>
+        <h1 style={{ fontSize: "1.6rem", fontWeight: 600, marginBottom: "0.5rem" }}>Split this with me?</h1>
         <p style={{ color: "var(--color-text-secondary)", marginBottom: "2rem" }}>
           Track shared expenses with your people.
         </p>
