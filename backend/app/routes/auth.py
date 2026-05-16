@@ -55,8 +55,7 @@ def login():
 @auth_bp.route("/callback")
 def callback():
     try:
-        redirect_uri = url_for("auth.callback", _external=True)
-        token = oauth.google.authorize_access_token(redirect_uri=redirect_uri)
+        token = oauth.google.authorize_access_token()
         userinfo = (token or {}).get("userinfo")
 
         if not userinfo:
